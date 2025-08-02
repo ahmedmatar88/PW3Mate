@@ -1,4 +1,4 @@
-# Tesla Powerwall Automation 🔋⚡
+# PW3Mate - Tesla Powerwall 3 Automation 🔋⚡
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/)
@@ -10,14 +10,13 @@ Fully automated Tesla Powerwall backup reserve scheduling using AWS Lambda and T
 
 Automatically adjusts your Tesla Powerwall backup reserve percentage on a schedule you define:
 
-For Example:
-
+**Example Schedule:**
 - **11:31 PM** → Set backup reserve to **100%**
 - **12:29 AM** → Set backup reserve to **0%** 
 - **1:31 AM** → Set backup reserve to **100%**
 - **5:29 AM** → Set backup reserve to **0%**
 
-Perfect for time-of-use electricity billing or optimising solar energy usage!
+Perfect for time-of-use electricity billing or forcing charges!
 
 ## ✨ **Features**
 
@@ -30,9 +29,6 @@ Perfect for time-of-use electricity billing or optimising solar energy usage!
 - 🔧 **Error Recovery** - Automatic backup systems and detailed error reporting
 - 📊 **Live Status** - Real-time battery level, solar production, and power flow data
 
-## 📱 **Discord Notifications**
-
-Get beautiful, informative notifications for every operation
 
 ## 🏗️ **Architecture**
 
@@ -50,32 +46,33 @@ Get beautiful, informative notifications for every operation
                        └──────────────────┘    └───────────────────┘
 ```
 
-
 ## 🚀 **Quick Start**
 
 ### Prerequisites
 - Tesla Powerwall 3
 - AWS Account with Lambda access
 - Discord server (for notifications)
-- Tesla Fleet API developer account
+- GitHub account (for Tesla Fleet API domain requirement)
 
-### 1. Tesla Fleet API Setup
-1. Register at [Tesla Developer Portal](https://developer.tesla.com/)
-2. Create your application and get client credentials
-3. Complete the Fleet API registration process
-4. Generate initial OAuth tokens
+### Setup Process
+1. **[Tesla Fleet API Setup](docs/01-tesla-fleet-api-setup.md)** (20 minutes)
+2. **[GitHub Domain Setup](docs/02-github-domain-setup.md)** (10 minutes)
+3. **[AWS Infrastructure Setup](docs/03-aws-infrastructure-setup.md)** (30 minutes)  
+4. **[Discord Configuration](docs/04-discord-configuration.md)** (5 minutes)
+5. **[Token Generation](docs/05-token-generation.md)** (15 minutes)
+6. **[Testing & Deployment](docs/06-testing-deployment.md)** (15 minutes)
 
-### 2. AWS Deployment
-1. Deploy the Lambda functions using our automated scripts
-2. Configure AWS Parameter Store with your Tesla credentials
-3. Set up EventBridge schedules for automation
-4. Configure Discord webhook for notifications
+## 💰 **Cost Breakdown**
 
-### 3. Test & Enjoy
-Run the test suite to verify everything works, then sit back and let your Powerwall optimize itself!
+| Service | Monthly Cost |
+|---------|-------------|
+| AWS Lambda (executions) | ~$0.006 |
+| AWS Parameter Store | $0.000 |
+| AWS EventBridge | $0.000 |
+| GitHub Pages (domain) | $0.000 |
+| **Total** | **~$0.01/month** |
 
-**👉 [Complete Setup Guide](docs/setup-guide.md)**
-
+*Based on standard schedule (6 executions/day)*
 
 ## 🛠️ **Customization**
 
@@ -91,39 +88,49 @@ Update EventBridge event payloads:
 ### Add More Schedules
 Create additional EventBridge rules with different times and percentages.
 
+### Different Time Zones
+All examples use UTC. Convert your local time:
+- **US Eastern**: Add 4-5 hours to local time
+- **US Pacific**: Add 7-8 hours to local time  
+- **Australian Eastern**: Subtract 10-11 hours from local time
+
 ## 📁 **Project Structure**
 
 ```
-tesla-powerwall-scheduler/
-├── src/lambda/                    # Lambda function source code
-├── docs/                          # Comprehensive documentation  
-├── deployment/                    # AWS deployment templates
-├── scripts/                       # Automation and utility scripts
-├── examples/                      # Configuration examples
-└── tests/                         # Test suite
+PW3Mate/
+├── src/
+│   └── lambda/
+│       ├── token_refresh/
+│       │   └── lambda_function.py     # Daily token refresh
+│       └── powerwall_scheduler/
+│           └── lambda_function.py     # Powerwall scheduling
+├── docs/
+│   ├── setup-guide.md                 # Complete step-by-step guide
+│   ├── troubleshooting.md            # Common issues & solutions
+│   ├── 01-tesla-fleet-api-setup.md   # Tesla API registration
+│   ├── 02-github-domain-setup.md     # Free domain setup
+│   ├── 03-aws-infrastructure-setup.md # AWS deployment (UI)
+│   ├── 04-discord-configuration.md   # Discord webhook setup
+│   ├── 05-token-generation.md        # OAuth token generation
+│   └── 06-testing-deployment.md      # Testing & schedule deployment
+└── tests/
+    ├── test_token_refresh.py         # Unit tests
+    └── test_powerwall_scheduler.py   # Integration tests
 ```
 
 ## 🔧 **Development**
 
 ### Local Testing
 ```bash
+# Clone repository
+git clone https://github.com/yourusername/PW3Mate.git
+cd PW3Mate
+
 # Install dependencies
 pip install -r requirements.txt
 
-# Test Tesla API connection
-python src/local/test_api.py
-
-# Generate initial tokens
-python src/local/generate_tokens.py
-```
-
-### Deployment
-```bash
-# Automated deployment
-./scripts/deploy.sh
-
-# Manual deployment
-aws lambda create-function ...
+# Test Tesla API connection (after setup)
+python tests/test_token_refresh.py
 ```
 
 ## 🐛 **Troubleshooting**
@@ -134,19 +141,6 @@ Common issues and solutions:
 - **API Rate Limits**: Built-in retry logic and exponential backoff
 - **Network Issues**: Dual refresh system provides redundancy
 - **Missing Notifications**: Check Discord webhook configuration
-
-**👉 [Full Troubleshooting Guide](docs/troubleshooting.md)**
-
-## 💰 **Cost Breakdown**
-
-| Service | Monthly Cost |
-|---------|-------------|
-| AWS Lambda (executions) | ~$0.006 |
-| AWS Parameter Store | $0.000 |
-| AWS EventBridge | $0.000 |
-| **Total** | **~$0.01/month** |
-
-*Based on standard schedule (6 executions/day)*
 
 ## 🤝 **Contributing**
 
@@ -178,6 +172,15 @@ This project is not affiliated with Tesla, Inc. Use at your own risk. Always mon
 - 🐛 Report bugs via [GitHub Issues](../../issues)
 - 💬 Join discussions in [GitHub Discussions](../../discussions)
 - ⭐ Star this repo if it helped you!
+
+## 🚀 **What's Next?**
+
+After setup, your Powerwall will:
+- ✅ Automatically optimize backup reserve 4 times daily
+- ✅ Send beautiful Discord notifications for all changes
+- ✅ Run reliably with dual token refresh system
+- ✅ Cost less than $0.01/month to operate
+- ✅ Require zero maintenance
 
 ---
 
