@@ -16,7 +16,7 @@ Automatically adjusts your Tesla Powerwall backup reserve percentage on a schedu
 - **1:31 AM** → Set backup reserve to **100%**
 - **5:29 AM** → Set backup reserve to **0%**
 
-Perfect for time-of-use electricity billing or forcing charges!
+Perfect for time-of-use electricity billing or optimizing solar energy usage!
 
 ## ✨ **Features**
 
@@ -61,6 +61,8 @@ Perfect for time-of-use electricity billing or forcing charges!
 4. **[Discord Configuration](docs/04-discord-configuration.md)** (5 minutes)
 5. **[Token Generation](docs/05-token-generation.md)** (15 minutes)
 6. **[Testing & Deployment](docs/06-testing-deployment.md)** (15 minutes)
+
+**👉 [Start with the Complete Setup Guide](docs/setup-guide.md)**
 
 ## 💰 **Cost Breakdown**
 
@@ -142,6 +144,8 @@ Common issues and solutions:
 - **Network Issues**: Dual refresh system provides redundancy
 - **Missing Notifications**: Check Discord webhook configuration
 
+**👉 [Full Troubleshooting Guide](docs/troubleshooting.md)**
+
 ## 🤝 **Contributing**
 
 Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) and:
@@ -181,6 +185,8 @@ After setup, your Powerwall will:
 - ✅ Run reliably with dual token refresh system
 - ✅ Cost less than $0.01/month to operate
 - ✅ Require zero maintenance
+
+**Ready to automate your Tesla Powerwall?** Follow the [setup guide](docs/setup-guide.md) to get started!
 
 ---
 
