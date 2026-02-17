@@ -21,13 +21,14 @@ Perfect for time-of-use electricity billing or optimizing solar energy usage!
 ## ✨ **Features**
 
 - 🔄 **Fully Automated** - Zero maintenance after setup
-- 🛡️ **Dual Redundancy** - Two daily token refreshes for maximum reliability  
+- 🛡️ **Dual Redundancy** - Two daily token refreshes for maximum reliability
 - 📱 **Beautiful Notifications** - Rich Discord embeds with live Powerwall data
 - 🔐 **Enterprise Security** - All credentials encrypted in AWS Parameter Store
 - 💰 **Cost Effective** - Runs for approximately $0.01/month
 - ⚙️ **Easy Customization** - Modify schedules without code changes
 - 🔧 **Error Recovery** - Automatic backup systems and detailed error reporting
 - 📊 **Live Status** - Real-time battery level, solar production, and power flow data
+- 🖥️ **Web UI** - Browser-based schedule manager to view, add, edit, and delete schedules
 
 
 ## 🏗️ **Architecture**
@@ -57,10 +58,11 @@ Perfect for time-of-use electricity billing or optimizing solar energy usage!
 ### Setup Process
 1. **[Tesla Fleet API Setup](docs/01-tesla-fleet-api-setup.md)** (20 minutes)
 2. **[GitHub Domain Setup](docs/02-github-domain-setup.md)** (10 minutes)
-3. **[AWS Infrastructure Setup](docs/03-aws-infrastructure-setup.md)** (30 minutes)  
+3. **[AWS Infrastructure Setup](docs/03-aws-infrastructure-setup.md)** (30 minutes)
 4. **[Discord Configuration](docs/04-discord-configuration.md)** (5 minutes)
 5. **[Token Generation](docs/05-token-generation.md)** (15 minutes)
 6. **[Testing & Deployment](docs/06-testing-deployment.md)** (15 minutes)
+7. **[Schedule Manager UI](docs/07-schedule-manager-ui-setup.md)** (30 minutes) — *Optional*
 
 **👉 [Start with the Complete Setup Guide](docs/setup-guide.md)**
 
@@ -104,8 +106,14 @@ PW3Mate/
 │   └── lambda/
 │       ├── token_refresh/
 │       │   └── lambda_function.py     # Daily token refresh
-│       └── powerwall_scheduler/
-│           └── lambda_function.py     # Powerwall scheduling
+│       ├── powerwall_scheduler/
+│       │   └── lambda_function.py     # Powerwall scheduling
+│       └── schedule_manager/
+│           └── lambda_function.py     # Schedule manager API (UI backend)
+├── ui/
+│   ├── index.html                     # Schedule manager web UI
+│   ├── styles.css                     # UI styles
+│   └── app.js                         # UI application logic
 ├── docs/
 │   ├── setup-guide.md                 # Complete step-by-step guide
 │   ├── troubleshooting.md            # Common issues & solutions
@@ -114,10 +122,12 @@ PW3Mate/
 │   ├── 03-aws-infrastructure-setup.md # AWS deployment (UI)
 │   ├── 04-discord-configuration.md   # Discord webhook setup
 │   ├── 05-token-generation.md        # OAuth token generation
-│   └── 06-testing-deployment.md      # Testing & schedule deployment
+│   ├── 06-testing-deployment.md      # Testing & schedule deployment
+│   └── 07-schedule-manager-ui-setup.md # Web UI deployment
 └── tests/
-    ├── test_token_refresh.py         # Unit tests
-    └── test_powerwall_scheduler.py   # Integration tests
+    ├── test_token_refresh.py         # Token refresh tests
+    ├── test_powerwall_scheduler.py   # Powerwall scheduler tests
+    └── test_schedule_manager.py      # Schedule manager API tests
 ```
 
 ## 🔧 **Development**
