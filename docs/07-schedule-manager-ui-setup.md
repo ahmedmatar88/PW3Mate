@@ -61,11 +61,18 @@ The UI uses a simple password for authentication.
             "Resource": "arn:aws:ssm:*:*:parameter/tesla/powerwall/*"
         },
         {
-            "Sid": "EventBridgeAccess",
+            "Sid": "EventBridgeListRules",
             "Effect": "Allow",
             "Action": [
                 "events:ListRules",
-                "events:ListTargetsByRule",
+                "events:ListTargetsByRule"
+            ],
+            "Resource": "arn:aws:events:*:*:rule/*"
+        },
+        {
+            "Sid": "EventBridgeManageRules",
+            "Effect": "Allow",
+            "Action": [
                 "events:PutRule",
                 "events:PutTargets",
                 "events:RemoveTargets",
