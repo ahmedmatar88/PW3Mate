@@ -1,0 +1,584 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  PW3Mate - Tesla Powerwall 3 Automation Stack
+  Deploys Lambda functions, IAM roles, EventBridge schedules, API Gateway,
+  and SSM Parameter Store entries for automated Powerwall backup reserve management.
+
+# ============================================================================
+# Parameters - User inputs during stack creation
+# ============================================================================
+Parameters:
+  TeslaClientId:
+    Type: String
+    Description: Tesla Fleet API Client ID (UUID)
+    NoEcho: true
+
+  TeslaClientSecret:
+    Type: String
+    Description: Tesla Fleet API Client Secret
+    NoEcho: true
+
+  TeslaAccessToken:
+    Type: String
+    Description: Tesla OAuth2 Access Token (from initial OAuth flow)
+    NoEcho: true
+
+  TeslaRefreshToken:
+    Type: String
+    Description: Tesla OAuth2 Refresh Token (from initial OAuth flow)
+    NoEcho: true
+
+  DiscordWebhookUrl:
+    Type: String
+    Description: Discord Webhook URL for notifications
+    NoEcho: true
+    Default: ''
+
+  UIPassword:
+    Type: String
+    Description: Password for the Schedule Manager web UI
+    NoEcho: true
+    Default: ''
+
+  LambdaS3Bucket:
+    Type: String
+    Description: S3 bucket containing the Lambda deployment packages (ZIP files)
+
+  TokenRefreshS3Key:
+    Type: String
+    Description: S3 key for the token_refresh Lambda ZIP
+    Default: lambda/token_refresh.zip
+
+  PowerwallSchedulerS3Key:
+    Type: String
+    Description: S3 key for the powerwall_scheduler Lambda ZIP
+    Default: lambda/powerwall_scheduler.zip
+
+  ScheduleManagerS3Key:
+    Type: String
+    Description: S3 key for the schedule_manager Lambda ZIP
+    Default: lambda/schedule_manager.zip
+
+  TeslaRegion:
+    Type: String
+    Description: Tesla Fleet API region
+    Default: eu
+    AllowedValues: [eu, na]
+
+# ============================================================================
+# Conditions
+# ============================================================================
+Conditions:
+  HasDiscordWebhook: !Not [!Equals [!Ref DiscordWebhookUrl, '']]
+  HasUIPassword: !Not [!Equals [!Ref UIPassword, '']]
+
+# ============================================================================
+# Resources
+# ============================================================================
+Resources:
+
+  # --------------------------------------------------------------------------
+  # SSM Parameter Store - Tesla Credentials
+  # --------------------------------------------------------------------------
+  ParamClientId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /tesla/powerwall/client_id
+      Type: String
+      Value: !Ref TeslaClientId
+      Description: Tesla Fleet API Client ID
+
+  ParamClientSecret:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /tesla/powerwall/client_secret
+      Type: String
+      Value: !Ref TeslaClientSecret
+      Description: Tesla Fleet API Client Secret
+
+  ParamAccessToken:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /tesla/powerwall/access_token
+      Type: String
+      Value: !Ref TeslaAccessToken
+      Description: Tesla OAuth2 Access Token
+
+  ParamRefreshToken:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /tesla/powerwall/refresh_token
+      Type: String
+      Value: !Ref TeslaRefreshToken
+      Description: Tesla OAuth2 Refresh Token
+
+  ParamDiscordWebhook:
+    Type: AWS::SSM::Parameter
+    Condition: HasDiscordWebhook
+    Properties:
+      Name: /tesla/powerwall/discord_webhook
+      Type: String
+      Value: !Ref DiscordWebhookUrl
+      Description: Discord Webhook URL for notifications
+
+  ParamUIPassword:
+    Type: AWS::SSM::Parameter
+    Condition: HasUIPassword
+    Properties:
+      Name: /tesla/powerwall/ui_password
+      Type: String
+      Value: !Ref UIPassword
+      Description: Schedule Manager UI password
+
+  # --------------------------------------------------------------------------
+  # IAM Role - Shared by all Lambda functions
+  # --------------------------------------------------------------------------
+  PW3MateLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: PW3Mate-Lambda-Role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - scheduler.amazonaws.com
+                - events.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: PW3Mate-ParameterStore-Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:PutParameter
+                Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/tesla/powerwall/*
+        - PolicyName: PW3Mate-EventBridge-Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - events:PutRule
+                  - events:DeleteRule
+                  - events:PutTargets
+                  - events:RemoveTargets
+                  - events:ListRules
+                  - events:ListTargetsByRule
+                  - events:EnableRule
+                  - events:DisableRule
+                Resource: !Sub arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/PW3Mate-*
+        - PolicyName: PW3Mate-Lambda-Invoke
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:PW3Mate-*
+
+  # --------------------------------------------------------------------------
+  # Lambda Layer - requests library (shared dependency)
+  # --------------------------------------------------------------------------
+  RequestsLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      LayerName: PW3Mate-Requests
+      Description: Python requests library for Tesla API calls
+      CompatibleRuntimes:
+        - python3.11
+        - python3.12
+      Content:
+        S3Bucket: !Ref LambdaS3Bucket
+        S3Key: lambda/requests-layer.zip
+
+  # --------------------------------------------------------------------------
+  # Lambda Function 1: Token Refresh
+  # --------------------------------------------------------------------------
+  TokenRefreshFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: PW3Mate-Token-Refresh
+      Description: Daily Tesla token refresh - runs at 9 PM and 10 PM UTC
+      Handler: lamda_function.lambda_handler
+      Runtime: python3.11
+      MemorySize: 256
+      Timeout: 60
+      Role: !GetAtt PW3MateLambdaRole.Arn
+      Layers:
+        - !Ref RequestsLayer
+      Code:
+        S3Bucket: !Ref LambdaS3Bucket
+        S3Key: !Ref TokenRefreshS3Key
+
+  TokenRefreshLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${TokenRefreshFunction}
+      RetentionInDays: 14
+
+  # --------------------------------------------------------------------------
+  # Lambda Function 2: Powerwall Scheduler
+  # --------------------------------------------------------------------------
+  PowerwallSchedulerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: PW3Mate-Powerwall-Scheduler
+      Description: Sets Powerwall backup reserve percentage on schedule
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.11
+      MemorySize: 256
+      Timeout: 60
+      Role: !GetAtt PW3MateLambdaRole.Arn
+      Layers:
+        - !Ref RequestsLayer
+      Code:
+        S3Bucket: !Ref LambdaS3Bucket
+        S3Key: !Ref PowerwallSchedulerS3Key
+
+  PowerwallSchedulerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${PowerwallSchedulerFunction}
+      RetentionInDays: 14
+
+  # --------------------------------------------------------------------------
+  # Lambda Function 3: Schedule Manager (API)
+  # --------------------------------------------------------------------------
+  ScheduleManagerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: PW3Mate-Schedule-Manager
+      Description: REST API for web UI to manage Powerwall schedules
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.11
+      MemorySize: 256
+      Timeout: 30
+      Role: !GetAtt PW3MateLambdaRole.Arn
+      Code:
+        S3Bucket: !Ref LambdaS3Bucket
+        S3Key: !Ref ScheduleManagerS3Key
+      Environment:
+        Variables:
+          SCHEDULER_LAMBDA_ARN: !GetAtt PowerwallSchedulerFunction.Arn
+
+  ScheduleManagerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${ScheduleManagerFunction}
+      RetentionInDays: 14
+
+  # --------------------------------------------------------------------------
+  # EventBridge Rules - Token Refresh (9 PM & 10 PM UTC)
+  # --------------------------------------------------------------------------
+  TokenRefresh9PMRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: PW3Mate-Token-Refresh-9PM
+      Description: Primary daily token refresh at 9 PM UTC
+      ScheduleExpression: 'cron(0 21 * * ? *)'
+      State: ENABLED
+      Targets:
+        - Id: token-refresh-primary
+          Arn: !GetAtt TokenRefreshFunction.Arn
+
+  TokenRefresh10PMRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: PW3Mate-Token-Refresh-10PM
+      Description: Backup daily token refresh at 10 PM UTC
+      ScheduleExpression: 'cron(0 22 * * ? *)'
+      State: ENABLED
+      Targets:
+        - Id: token-refresh-backup
+          Arn: !GetAtt TokenRefreshFunction.Arn
+
+  # Lambda permissions for EventBridge to invoke Token Refresh
+  TokenRefresh9PMPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref TokenRefreshFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt TokenRefresh9PMRule.Arn
+
+  TokenRefresh10PMPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref TokenRefreshFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt TokenRefresh10PMRule.Arn
+
+  # --------------------------------------------------------------------------
+  # EventBridge Rules - Powerwall Schedules (4 default schedules)
+  # --------------------------------------------------------------------------
+  Powerwall2331Rule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: PW3Mate-Powerwall-2331-100percent
+      Description: 'PW3Mate: Set Powerwall backup reserve to 100% at 23:31 UTC'
+      ScheduleExpression: 'cron(31 23 * * ? *)'
+      State: ENABLED
+      Targets:
+        - Id: powerwall-scheduler
+          Arn: !GetAtt PowerwallSchedulerFunction.Arn
+          Input: '{"backup_reserve_percent": 100, "schedule_name": "11:31 PM UTC - Set to 100%"}'
+
+  Powerwall0029Rule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: PW3Mate-Powerwall-0029-0percent
+      Description: 'PW3Mate: Set Powerwall backup reserve to 0% at 00:29 UTC'
+      ScheduleExpression: 'cron(29 0 * * ? *)'
+      State: ENABLED
+      Targets:
+        - Id: powerwall-scheduler
+          Arn: !GetAtt PowerwallSchedulerFunction.Arn
+          Input: '{"backup_reserve_percent": 0, "schedule_name": "12:29 AM UTC - Set to 0%"}'
+
+  Powerwall0131Rule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: PW3Mate-Powerwall-0131-100percent
+      Description: 'PW3Mate: Set Powerwall backup reserve to 100% at 01:31 UTC'
+      ScheduleExpression: 'cron(31 1 * * ? *)'
+      State: ENABLED
+      Targets:
+        - Id: powerwall-scheduler
+          Arn: !GetAtt PowerwallSchedulerFunction.Arn
+          Input: '{"backup_reserve_percent": 100, "schedule_name": "1:31 AM UTC - Set to 100%"}'
+
+  Powerwall0529Rule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: PW3Mate-Powerwall-0529-0percent
+      Description: 'PW3Mate: Set Powerwall backup reserve to 0% at 05:29 UTC'
+      ScheduleExpression: 'cron(29 5 * * ? *)'
+      State: ENABLED
+      Targets:
+        - Id: powerwall-scheduler
+          Arn: !GetAtt PowerwallSchedulerFunction.Arn
+          Input: '{"backup_reserve_percent": 0, "schedule_name": "5:29 AM UTC - Set to 0%"}'
+
+  # Lambda permissions for EventBridge to invoke Powerwall Scheduler
+  Powerwall2331Permission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref PowerwallSchedulerFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt Powerwall2331Rule.Arn
+
+  Powerwall0029Permission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref PowerwallSchedulerFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt Powerwall0029Rule.Arn
+
+  Powerwall0131Permission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref PowerwallSchedulerFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt Powerwall0131Rule.Arn
+
+  Powerwall0529Permission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref PowerwallSchedulerFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt Powerwall0529Rule.Arn
+
+  # --------------------------------------------------------------------------
+  # API Gateway - Schedule Manager REST API
+  # --------------------------------------------------------------------------
+  PW3MateApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: PW3Mate-API
+      Description: PW3Mate Schedule Manager API
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  # /api resource
+  ApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref PW3MateApi
+      ParentId: !GetAtt PW3MateApi.RootResourceId
+      PathPart: api
+
+  # /api/login resource
+  LoginResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref PW3MateApi
+      ParentId: !Ref ApiResource
+      PathPart: login
+
+  LoginPostMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref PW3MateApi
+      ResourceId: !Ref LoginResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ScheduleManagerFunction.Arn}/invocations
+
+  LoginOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref PW3MateApi
+      ResourceId: !Ref LoginResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ScheduleManagerFunction.Arn}/invocations
+
+  # /api/schedules resource
+  SchedulesResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref PW3MateApi
+      ParentId: !Ref ApiResource
+      PathPart: schedules
+
+  SchedulesGetMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref PW3MateApi
+      ResourceId: !Ref SchedulesResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ScheduleManagerFunction.Arn}/invocations
+
+  SchedulesPostMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref PW3MateApi
+      ResourceId: !Ref SchedulesResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ScheduleManagerFunction.Arn}/invocations
+
+  SchedulesPutMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref PW3MateApi
+      ResourceId: !Ref SchedulesResource
+      HttpMethod: PUT
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ScheduleManagerFunction.Arn}/invocations
+
+  SchedulesDeleteMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref PW3MateApi
+      ResourceId: !Ref SchedulesResource
+      HttpMethod: DELETE
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ScheduleManagerFunction.Arn}/invocations
+
+  SchedulesOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref PW3MateApi
+      ResourceId: !Ref SchedulesResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ScheduleManagerFunction.Arn}/invocations
+
+  # API Gateway Deployment
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - LoginPostMethod
+      - LoginOptionsMethod
+      - SchedulesGetMethod
+      - SchedulesPostMethod
+      - SchedulesPutMethod
+      - SchedulesDeleteMethod
+      - SchedulesOptionsMethod
+    Properties:
+      RestApiId: !Ref PW3MateApi
+
+  ApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref PW3MateApi
+      DeploymentId: !Ref ApiDeployment
+      StageName: prod
+      Description: Production stage
+
+  # Lambda permission for API Gateway
+  ScheduleManagerApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ScheduleManagerFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${PW3MateApi}/*
+
+# ============================================================================
+# Outputs
+# ============================================================================
+Outputs:
+  TokenRefreshFunctionArn:
+    Description: ARN of the Token Refresh Lambda function
+    Value: !GetAtt TokenRefreshFunction.Arn
+
+  PowerwallSchedulerFunctionArn:
+    Description: ARN of the Powerwall Scheduler Lambda function
+    Value: !GetAtt PowerwallSchedulerFunction.Arn
+
+  ScheduleManagerFunctionArn:
+    Description: ARN of the Schedule Manager Lambda function
+    Value: !GetAtt ScheduleManagerFunction.Arn
+
+  LambdaRoleArn:
+    Description: ARN of the shared Lambda execution role
+    Value: !GetAtt PW3MateLambdaRole.Arn
+
+  ApiUrl:
+    Description: URL of the Schedule Manager API
+    Value: !Sub https://${PW3MateApi}.execute-api.${AWS::Region}.amazonaws.com/prod
+
+  ApiLoginEndpoint:
+    Description: Login endpoint
+    Value: !Sub https://${PW3MateApi}.execute-api.${AWS::Region}.amazonaws.com/prod/api/login
+
+  ApiSchedulesEndpoint:
+    Description: Schedules endpoint
+    Value: !Sub https://${PW3MateApi}.execute-api.${AWS::Region}.amazonaws.com/prod/api/schedules
